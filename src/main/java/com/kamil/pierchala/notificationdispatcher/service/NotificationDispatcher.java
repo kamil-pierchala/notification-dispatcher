@@ -1,8 +1,12 @@
 package com.kamil.pierchala.notificationdispatcher.service;
 
+import com.kamil.pierchala.notificationdispatcher.dto.NotificationLogResponse;
 import com.kamil.pierchala.notificationdispatcher.dto.NotificationRequest;
 import com.kamil.pierchala.notificationdispatcher.dto.NotificationResponse;
 import com.kamil.pierchala.notificationdispatcher.model.NotificationChannel;
+import com.kamil.pierchala.notificationdispatcher.model.NotificationLog;
+import com.kamil.pierchala.notificationdispatcher.model.NotificationStatus;
+import com.kamil.pierchala.notificationdispatcher.repository.NotificationLogRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -16,23 +20,52 @@ import java.util.stream.Collectors;
 public class NotificationDispatcher {
 
     private final Map<NotificationChannel, NotificationSender> senders;
+    private final NotificationLogRepository logRepository;
 
-    public NotificationDispatcher(List<NotificationSender> senderList) {
+    public NotificationDispatcher(List<NotificationSender> senderList, NotificationLogRepository logRepository) {
         this.senders = senderList.stream()
                 .collect(Collectors.toMap(NotificationSender::supportsChannel, Function.identity()));
+        this.logRepository = logRepository;
     }
 
     public NotificationResponse dispatch(NotificationRequest request) {
         NotificationSender sender = Optional.ofNullable(senders.get(request.channel()))
                 .orElseThrow(() -> new IllegalArgumentException("Unsupported notification channel: " + request.channel()));
 
-        sender.send(request);
+        NotificationStatus status = NotificationStatus.FAILED;
+        String errorMessage = null;
+
+        try {
+            sender.send(request);
+            status = NotificationStatus.SENT;
+        } catch (Exception ex) {
+            status = NotificationStatus.FAILED;
+            errorMessage = ex.getMessage();
+            throw ex;
+        } finally {
+            NotificationLog logEntry = new NotificationLog(
+                    request.recipient(),
+                    request.channel(),
+                    request.title(),
+                    request.content(),
+                    status,
+                    errorMessage
+            );
+            logRepository.save(logEntry);
+        }
 
         return new NotificationResponse(
-                "SUCCESS",
+                status.name(),
                 request.channel(),
                 request.recipient(),
                 Instant.now()
         );
+    }
+
+    public List<NotificationLogResponse> getHistory() {
+        return logRepository.findAllByOrderByCreatedAtDesc()
+                .stream()
+                .map(NotificationLogResponse::fromEntity)
+                .toList();
     }
 }
