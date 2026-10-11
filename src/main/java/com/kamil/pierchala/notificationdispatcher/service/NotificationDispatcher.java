@@ -21,41 +21,37 @@ public class NotificationDispatcher {
 
     private final Map<NotificationChannel, NotificationSender> senders;
     private final NotificationLogRepository logRepository;
+    private final NotificationAsyncProcessor asyncProcessor;
 
-    public NotificationDispatcher(List<NotificationSender> senderList, NotificationLogRepository logRepository) {
+    public NotificationDispatcher(
+            List<NotificationSender> senderList,
+            NotificationLogRepository logRepository,
+            NotificationAsyncProcessor asyncProcessor) {
         this.senders = senderList.stream()
                 .collect(Collectors.toMap(NotificationSender::supportsChannel, Function.identity()));
         this.logRepository = logRepository;
+        this.asyncProcessor = asyncProcessor;
     }
 
     public NotificationResponse dispatch(NotificationRequest request) {
         NotificationSender sender = Optional.ofNullable(senders.get(request.channel()))
                 .orElseThrow(() -> new IllegalArgumentException("Unsupported notification channel: " + request.channel()));
 
-        NotificationStatus status = NotificationStatus.FAILED;
-        String errorMessage = null;
+        NotificationLog pendingLog = new NotificationLog(
+                request.recipient(),
+                request.channel(),
+                request.title(),
+                request.content(),
+                NotificationStatus.PENDING,
+                null
+        );
+        NotificationLog savedLog = logRepository.save(pendingLog);
 
-        try {
-            sender.send(request);
-            status = NotificationStatus.SENT;
-        } catch (Exception ex) {
-            status = NotificationStatus.FAILED;
-            errorMessage = ex.getMessage();
-            throw ex;
-        } finally {
-            NotificationLog logEntry = new NotificationLog(
-                    request.recipient(),
-                    request.channel(),
-                    request.title(),
-                    request.content(),
-                    status,
-                    errorMessage
-            );
-            logRepository.save(logEntry);
-        }
+        asyncProcessor.processAsync(sender, request, savedLog.getId());
 
         return new NotificationResponse(
-                status.name(),
+                savedLog.getId(),
+                NotificationStatus.PENDING,
                 request.channel(),
                 request.recipient(),
                 Instant.now()
