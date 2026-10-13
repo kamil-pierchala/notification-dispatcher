@@ -74,4 +74,13 @@ class NotificationControllerIntegrationTest {
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$").isArray());
     }
+
+    @Test
+    @DisplayName("GET /api/v1/notifications/{id} should return 404 NOT FOUND when log does not exist")
+    void shouldReturn404WhenNotificationNotFound() throws Exception {
+        mockMvc.perform(get("/api/v1/notifications/999999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Notification log with id 999999 not found"));
+    }
 }

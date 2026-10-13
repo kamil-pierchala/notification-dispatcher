@@ -3,6 +3,7 @@ package com.kamil.pierchala.notificationdispatcher.service;
 import com.kamil.pierchala.notificationdispatcher.dto.NotificationLogResponse;
 import com.kamil.pierchala.notificationdispatcher.dto.NotificationRequest;
 import com.kamil.pierchala.notificationdispatcher.dto.NotificationResponse;
+import com.kamil.pierchala.notificationdispatcher.exception.NotificationNotFoundException;
 import com.kamil.pierchala.notificationdispatcher.model.NotificationChannel;
 import com.kamil.pierchala.notificationdispatcher.model.NotificationLog;
 import com.kamil.pierchala.notificationdispatcher.model.NotificationStatus;
@@ -63,5 +64,11 @@ public class NotificationDispatcher {
                 .stream()
                 .map(NotificationLogResponse::fromEntity)
                 .toList();
+    }
+
+    public NotificationLogResponse getById(Long id) {
+        return logRepository.findById(id)
+                .map(NotificationLogResponse::fromEntity)
+                .orElseThrow(() -> new NotificationNotFoundException(id));
     }
 }

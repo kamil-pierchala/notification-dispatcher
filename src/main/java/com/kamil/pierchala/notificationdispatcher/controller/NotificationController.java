@@ -31,4 +31,9 @@ public class NotificationController {
     public ResponseEntity<List<NotificationLogResponse>> getHistory() {
         return ResponseEntity.ok(notificationDispatcher.getHistory());
     }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<NotificationLogResponse> getNotificationById(@PathVariable Long id) {
+        return ResponseEntity.ok(notificationDispatcher.getById(id));
+    }
 }
