@@ -6,6 +6,9 @@ import com.kamil.pierchala.notificationdispatcher.model.NotificationStatus;
 import com.kamil.pierchala.notificationdispatcher.repository.NotificationLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Recover;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -21,31 +24,42 @@ public class NotificationAsyncProcessor {
     }
 
     @Async("notificationTaskExecutor")
+    @Retryable(
+            retryFor = { Exception.class },
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 1000, multiplier = 2.0)
+    )
     public void processAsync(NotificationSender sender, NotificationRequest request, Long logId) {
-        log.info("Processing notification asynchronously for task [{}] in thread: {}",
-                logId, Thread.currentThread().getName());
-
-        NotificationLog logEntry = logRepository.findById(logId).orElse(null);
-        if (logEntry == null) {
-            log.error("Could not find log entry for id: {}", logId);
-            return;
-        }
+        log.info("Attempting notification delivery for task [{}] via [{}] on thread [{}]",
+                logId, request.channel(), Thread.currentThread().getName());
 
         try {
             // Simulation of network transmission time (e.g. 1.5s) to clearly demonstrate the asynchronous nature
             Thread.sleep(1500);
-
-            sender.send(request);
-            logEntry.setStatus(NotificationStatus.SENT);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new RuntimeException("Dispatch interrupted during simulation", e);
+        }
+
+        sender.send(request);
+
+        NotificationLog logEntry = logRepository.findById(logId).orElse(null);
+        if (logEntry != null) {
+            logEntry.setStatus(NotificationStatus.SENT);
+            logEntry.setErrorMessage(null);
+            logRepository.save(logEntry);
+            log.info("Notification task [{}] marked as SENT", logId);
+        }
+    }
+
+    @Recover
+    public void recover(Exception ex, NotificationSender sender, NotificationRequest request, Long logId) {
+        log.error("All retry attempts exhausted for task [{}]. Delivery failed: {}", logId, ex.getMessage());
+
+        NotificationLog logEntry = logRepository.findById(logId).orElse(null);
+        if (logEntry != null) {
             logEntry.setStatus(NotificationStatus.FAILED);
-            logEntry.setErrorMessage("Dispatch interrupted");
-        } catch (Exception ex) {
-            log.error("Failed to send notification for task [{}]: {}", logId, ex.getMessage());
-            logEntry.setStatus(NotificationStatus.FAILED);
-            logEntry.setErrorMessage(ex.getMessage());
-        } finally {
+            logEntry.setErrorMessage("Retries exhausted: " + ex.getMessage());
             logRepository.save(logEntry);
         }
     }
